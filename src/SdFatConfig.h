@@ -100,6 +100,8 @@
 //------------------------------------------------------------------------------
 #if ENABLE_ARDUINO_FEATURES
 #include <Arduino.h>
+#else
+#include "ArduinoCompat/Arduino.h"
 #endif  // ENABLE_ARDUINO_FEATURES
 //------------------------------------------------------------------------------
 /**
@@ -478,3 +480,4 @@ typedef uint8_t SdCsPin_t;
 /** Default is no SDIO. */
 #define HAS_SDIO_CLASS 0
 #endif  // HAS_SDIO_CLASS
+        //

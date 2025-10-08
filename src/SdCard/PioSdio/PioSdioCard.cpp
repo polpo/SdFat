@@ -28,12 +28,18 @@
 #include <algorithm>  // Required for std::max, std::min
 #define DEBUG_FILE "PioSdioCard.cpp"
 #include "../SdCardInfo.h"
+#if ENABLE_ARDUINO_FEATURES
 #include "DbgLog.h"
+#else
+#include "DbgLogDummy.h"
+#include <pico/time.h>
+#include <hardware/clocks.h>
+#endif
 #include "PioSdioCard.h"
 #include "PioSdioCard.pio.h"
 //------------------------------------------------------------------------------
 // USE_DEBUG_MODE 0 - no debug, 1 - print message, 2 - Use scope/analyzer.
-#define USE_DEBUG_MODE 1
+#define USE_DEBUG_MODE 0
 
 const uint PIO_CLK_DIV_RUN = 1;
 
@@ -415,7 +421,7 @@ bool PioSdioCard::cardCommand(CmdRsp_t cmd, uint32_t arg, void* rsp) {
     }
     if (rtn[nRsp - 1] != crc) {
 #if USE_DEBUG_MODE
-      Serial.printf("CHK: %02X, CRC: %02X\n", rtn[nRsp - 1], crc);
+      printf("CHK: %02X, CRC: %02X\n", rtn[nRsp - 1], crc);
       for (uint i = 0; i < nRsp; i++) {
         Serial.printf(" %02X", rtn[i]);
       }

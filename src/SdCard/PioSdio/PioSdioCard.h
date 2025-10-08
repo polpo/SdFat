@@ -1,3 +1,4 @@
+#include <cstdio>
 /**
  * Copyright (c) 2011-2025 Bill Greiman
  * This file is part of the SdFat library for SD memory cards.
@@ -29,6 +30,7 @@
 #pragma once
 #include "../../common/SysCall.h"
 #include "../SdCardInterface.h"
+#include <hardware/pio.h>
 #if defined(ARDUINO_ARCH_RP2040) && defined(PIN_SD_CLK) &&   \
     defined(PIN_SD_CMD_MOSI) && defined(PIN_SD_DAT0_MISO) && \
     defined(PIN_SD_DAT1) && defined(PIN_SD_DAT2) && defined(PIN_SD_DAT3_CS)
@@ -295,6 +297,7 @@ class PioSdioCard : public SdCardInterface {
   void powerUpClockCycles();
   bool readData(void* dst, size_t count);
   void setSdErrorCode(uint8_t code, uint32_t line) {
+      printf("err: %x %u\n", code, line);
     m_errorCode = code;
     m_errorLine = line;
   }
