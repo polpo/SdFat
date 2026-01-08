@@ -46,6 +46,9 @@ const uint PIO_CLK_DIV_RUN = 1;
 const uint PIN_SDIO_UNDEFINED = 63u;
 
 const uint DAT_FIFO_DEPTH = 8;
+
+// Total PIO instructions needed: cmd_rsp:10 + rd_clk:5 + rd_data:4 + wr_data:4 + wr_resp:4
+const uint SDIO_PIO_INSTRUCTIONS = 27;
 //==============================================================================
 // Command definitions.
 enum { RSP_R0 = 0, RSP_R1 = 1, RSP_R2 = 2, RSP_R3 = 3, RSP_R6 = 6, RSP_R7 = 7 };
@@ -192,29 +195,26 @@ static inline __attribute__((always_inline)) uint64_t crc16(uint64_t crc,
   return crc;
 }
 //------------------------------------------------------------------------------
-static bool claimPio(PIO pio, const pio_program_t* program) {
-  uint mask = 0;
+static bool claimPio(PIO pio, const pio_program_t* program, int* sm0, int* sm1) {
   if (!pio_can_add_program(pio, program)) {
     DBG_MSG("pio_can_add_program");
     return false;
   }
-  for (uint i = 0; i < NUM_PIO_STATE_MACHINES; i++) {
-    int sm = pio_claim_unused_sm(pio, false);
-    if (sm < 0) {
-      break;
-    }
-    mask |= 1u << sm;
+  // Only claim 2 SMs - that's all SdFat actually uses
+  int first_sm = pio_claim_unused_sm(pio, false);
+  if (first_sm < 0) {
+    DBG_MSG("pio_claim_unused_sm");
+    return false;
   }
-  if (mask == ((1u << NUM_PIO_STATE_MACHINES) - 1)) {
-    return true;
+  int second_sm = pio_claim_unused_sm(pio, false);
+  if (second_sm < 0) {
+    pio_sm_unclaim(pio, first_sm);
+    DBG_MSG("pio_claim_unused_sm");
+    return false;
   }
-  for (uint sm = 0; sm < NUM_PIO_STATE_MACHINES; sm++) {
-    if ((1u << sm) & mask) {
-      pio_sm_unclaim(pio, sm);
-    }
-  }
-  DBG_MSG("pio_can_add_program");
-  return false;
+  *sm0 = first_sm;
+  *sm1 = second_sm;
+  return true;
 }
 //==============================================================================
 // add to PioSdioCard class int the future.
@@ -524,9 +524,8 @@ void PioSdioCard::pioEnd() {
   if (!m_pio) {
     return;
   }
-  for (uint sm = 0; sm < NUM_PIO_STATE_MACHINES; sm++) {
-    pio_sm_unclaim(m_pio, sm);
-  }
+  pio_sm_unclaim(m_pio, m_sm0);
+  pio_sm_unclaim(m_pio, m_sm1);
   if (m_cmdRspOffset >= 0) {
     pio_remove_program(m_pio, &cmd_rsp_program, m_cmdRspOffset);
     m_cmdRspOffset = -1;
@@ -553,37 +552,39 @@ void PioSdioCard::pioEnd() {
 bool PioSdioCard::pioInit() {
   uint pin[] = {m_clkPin,      m_cmdPin,      m_dat0Pin,
                 m_dat0Pin + 1, m_dat0Pin + 2, m_dat0Pin + 3};
-  uint16_t pio_instructions[PIO_INSTRUCTION_COUNT];
+  uint16_t pio_instructions[SDIO_PIO_INSTRUCTIONS];
   pio_program_t pio_program = {.instructions = nullptr,
-                               .length = PIO_INSTRUCTION_COUNT,
+                               .length = SDIO_PIO_INSTRUCTIONS,
                                .origin = -1,
                                .pio_version = 0,
 #if PICO_PIO_VERSION > 0
                                .used_gpio_ranges = 0x0
 #endif
   };
-  if (claimPio(pio0, &pio_program)) {
+  if (claimPio(pio0, &pio_program, &m_sm0, &m_sm1)) {
     m_pio = pio0;
-  } else if (claimPio(pio1, &pio_program)) {
+  } else if (claimPio(pio1, &pio_program, &m_sm0, &m_sm1)) {
     m_pio = pio1;
 #if NUM_PIOS > 2
-  } else if (claimPio(pio2, &pio_program)) {
+  } else if (claimPio(pio2, &pio_program, &m_sm0, &m_sm1)) {
     m_pio = pio2;
 #endif
   } else {
     sdError(SD_CARD_ERROR_ADD_PIO_PROGRAM);
     goto fail;
   }
-  m_sm0 = 0;
-  m_sm1 = 1;
 #if PICO_PIO_USE_GPIO_BASE
   if (std::max({m_clkPin, m_cmdPin, m_dat0Pin + 3}) > 31) {
-    if (std::min({m_clkPin, m_cmdPin, m_dat0Pin}) < 16 ||
-        pio_set_gpio_base(m_pio, 16) != PICO_OK) {
+    if (std::min({m_clkPin, m_cmdPin, m_dat0Pin}) < 16) {
       sdError(SD_CARD_ERROR_ADD_PIO_PROGRAM);
       goto fail;
     }
-  } else if (pio_set_gpio_base(m_pio, 0) != PICO_OK) {
+    // Check if gpio_base is already set correctly (may have been set by another user of this PIO)
+    if (pio_get_gpio_base(m_pio) != 16 && pio_set_gpio_base(m_pio, 16) != PICO_OK) {
+      sdError(SD_CARD_ERROR_ADD_PIO_PROGRAM);
+      goto fail;
+    }
+  } else if (pio_get_gpio_base(m_pio) != 0 && pio_set_gpio_base(m_pio, 0) != PICO_OK) {
     sdError(SD_CARD_ERROR_ADD_PIO_PROGRAM);
     goto fail;
   }
