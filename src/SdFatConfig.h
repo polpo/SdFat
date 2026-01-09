@@ -132,8 +132,8 @@
 //------------------------------------------------------------------------------
 /**
  * Set USE_FAT_FILE_FAST_SEEK nonzero to enable fast seek support.
- * This allows files to build a Cluster Link Map Table (CLMT) for
- * O(fragments) seek time instead of O(clusters).
+ * This allows files to build a sector map for O(fragments) seek time instead
+ * of O(clusters).
  */
 #ifndef USE_FAT_FILE_FAST_SEEK
 #define USE_FAT_FILE_FAST_SEEK 1

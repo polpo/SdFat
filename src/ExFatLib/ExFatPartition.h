@@ -113,6 +113,10 @@ class ExFatPartition {
    * \return true if busy else false.
    */
   bool isBusy() { return m_blockDev->isBusy(); }
+  /** \return Pointer to block device. */
+  FsBlockDevice* blockDevice() { return m_blockDev; }
+  /** \return The logical sector number for the start of file data. */
+  Sector_t dataStartSector() const { return m_clusterHeapStartSector; }
   /** \return the root directory start cluster number. */
   Cluster_t rootDirectoryCluster() const { return m_rootDirectoryCluster; }
   /** \return the root directory length. */

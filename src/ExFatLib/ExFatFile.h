@@ -40,14 +40,14 @@ class ExFatVolume;
 //------------------------------------------------------------------------------
 #if USE_FAT_FILE_FAST_SEEK
 /**
- * \struct ExFatClmtEntry_t
- * \brief Entry in Cluster Link Map Table for fast seek.
+ * \struct ExFatSectorMapEntry_t
+ * \brief Entry in Sector Map Table for fast seek and raw SD access.
  */
-struct ExFatClmtEntry_t {
-  /** Number of clusters in this fragment (0 = end of table) */
-  uint32_t count;
-  /** First cluster of this fragment */
-  Cluster_t start;
+struct ExFatSectorMapEntry_t {
+  /** Number of sectors in this fragment (0 = end of table) */
+  uint32_t sectorCount;
+  /** First physical SD sector of this fragment */
+  Sector_t startSector;
 };
 #endif  // USE_FAT_FILE_FAST_SEEK
 //------------------------------------------------------------------------------
@@ -339,15 +339,29 @@ class ExFatFile {
   /** \return True if the file is contiguous. */
   bool isContiguous() const { return m_flags & FILE_FLAG_CONTIGUOUS; }
 #if USE_FAT_FILE_FAST_SEEK
-  /** Enable fast seek by building Cluster Link Map Table.
+  /** Enable fast seek by building sector map table.
    * \return true for success, false if allocation failed or file empty. */
   bool enableFastSeek();
-  /** Disable fast seek and free CLMT memory. */
+  /** Disable fast seek and free sector map memory. */
   void disableFastSeek();
   /** \return true if fast seek is enabled for this file. */
-  bool isFastSeekEnabled() const { return m_clmt != nullptr; }
+  bool isFastSeekEnabled() const { return m_sectorMap != nullptr; }
   /** \return number of fragments in file (0 if fast seek not enabled). */
-  uint16_t fragmentCount() const { return m_clmt ? m_clmtUsed - 1 : 0; }
+  uint16_t fragmentCount() const { return m_sectorMap ? m_sectorMapUsed - 1 : 0; }
+  /** Read sectors directly from SD card, bypassing filesystem.
+   * Requires enableFastSeek() to have been called.
+   * \param[in] fileSector Starting sector number within file (0-based).
+   * \param[out] dst Pointer to buffer for data.
+   * \param[in] count Number of 512-byte sectors to read.
+   * \return Number of sectors read, or 0 on error. */
+  uint32_t readSectorsDirect(uint32_t fileSector, uint8_t* dst, uint32_t count);
+  /** Write sectors directly to SD card, bypassing filesystem.
+   * Requires enableFastSeek() to have been called.
+   * \param[in] fileSector Starting sector number within file (0-based).
+   * \param[in] src Pointer to data to write.
+   * \param[in] count Number of 512-byte sectors to write.
+   * \return Number of sectors written, or 0 on error. */
+  uint32_t writeSectorsDirect(uint32_t fileSector, const uint8_t* src, uint32_t count);
 #endif  // USE_FAT_FILE_FAST_SEEK
   /** \return True if this is a directory. */
   bool isDir() const { return m_attributes & FILE_ATTR_DIR; }
@@ -872,9 +886,9 @@ class ExFatFile {
   ExFatVolume* volume() const { return m_vol; }
   bool syncDir();
 #if USE_FAT_FILE_FAST_SEEK
-  bool buildClmt();
-  Cluster_t clmtLookup(uint32_t clusterIndex) const;
-  void freeClmt();
+  bool buildSectorMap();
+  Sector_t sectorMapLookup(uint32_t fileSector, uint32_t* fragmentRemaining) const;
+  void freeSectorMap();
 #endif  // USE_FAT_FILE_FAST_SEEK
   //----------------------------------------------------------------------------
   static const uint8_t WRITE_ERROR = 0X1;
@@ -909,9 +923,9 @@ class ExFatFile {
   uint8_t m_error = 0;
   uint8_t m_flags = 0;
 #if USE_FAT_FILE_FAST_SEEK
-  ExFatClmtEntry_t* m_clmt = nullptr;  // Cluster Link Map Table
-  uint16_t m_clmtSize = 0;             // Allocated entries in CLMT
-  uint16_t m_clmtUsed = 0;             // Used entries in CLMT
+  ExFatSectorMapEntry_t* m_sectorMap = nullptr;  // Sector Map Table
+  uint16_t m_sectorMapSize = 0;                  // Allocated entries
+  uint16_t m_sectorMapUsed = 0;                  // Used entries
 #endif  // USE_FAT_FILE_FAST_SEEK
 };
 #include "../common/ArduinoFiles.h"

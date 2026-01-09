@@ -74,7 +74,7 @@ uint8_t* ExFatFile::dirCache(uint8_t set, uint8_t options) {
 //------------------------------------------------------------------------------
 bool ExFatFile::close() {
 #if USE_FAT_FILE_FAST_SEEK
-  freeClmt();
+  freeSectorMap();
 #endif  // USE_FAT_FILE_FAST_SEEK
   bool rtn = sync();
   m_attributes = FILE_ATTR_CLOSED;
@@ -728,12 +728,17 @@ bool ExFatFile::seekSet(uint64_t pos) {
     goto done;
   }
 #if USE_FAT_FILE_FAST_SEEK
-  if (m_clmt) {
-    m_curCluster = clmtLookup(nNew);
-    if (m_curCluster == 0) {
+  if (m_sectorMap) {
+    // Convert cluster index to sector index within file
+    uint32_t fileSector = nNew * m_vol->sectorsPerCluster();
+    Sector_t physicalSector = sectorMapLookup(fileSector, nullptr);
+    if (physicalSector == 0) {
       DBG_FAIL_MACRO;
       goto fail;
     }
+    // Convert physical sector back to cluster number
+    m_curCluster = (physicalSector - m_vol->dataStartSector()) /
+                   m_vol->sectorsPerCluster() + 2;
     goto done;
   }
 #endif  // USE_FAT_FILE_FAST_SEEK
@@ -763,132 +768,216 @@ fail:
 }
 //------------------------------------------------------------------------------
 #if USE_FAT_FILE_FAST_SEEK
-bool ExFatFile::buildClmt() {
-  // Can't build CLMT for empty file or directory
+bool ExFatFile::buildSectorMap() {
+  // Can't build sector map for empty file or directory
   if (m_firstCluster == 0 || m_dataLength == 0 || !isFile()) {
     return false;
   }
 
+  uint32_t sectorsPerCluster = m_vol->sectorsPerCluster();
+
   // Contiguous files need only 2 entries
   if (isContiguous()) {
-    m_clmt = new ExFatClmtEntry_t[2];
-    if (!m_clmt) {
+    m_sectorMap = new ExFatSectorMapEntry_t[2];
+    if (!m_sectorMap) {
       return false;
     }
-    m_clmtSize = 2;
+    m_sectorMapSize = 2;
     uint32_t clusters =
         (m_dataLength + m_vol->bytesPerCluster() - 1) >> m_vol->bytesPerClusterShift();
-    m_clmt[0].count = clusters;
-    m_clmt[0].start = m_firstCluster;
-    m_clmt[1].count = 0;  // Terminator
-    m_clmt[1].start = 0;
-    m_clmtUsed = 2;
+    m_sectorMap[0].sectorCount = clusters * sectorsPerCluster;
+    m_sectorMap[0].startSector = m_vol->clusterStartSector(m_firstCluster);
+    m_sectorMap[1].sectorCount = 0;  // Terminator
+    m_sectorMap[1].startSector = 0;
+    m_sectorMapUsed = 2;
     return true;
   }
 
   // Allocate initial buffer
   uint16_t capacity = 16;
-  m_clmt = new ExFatClmtEntry_t[capacity];
-  if (!m_clmt) {
+  m_sectorMap = new ExFatSectorMapEntry_t[capacity];
+  if (!m_sectorMap) {
     return false;
   }
 
   // Walk FAT chain and build fragment table
   Cluster_t cluster = m_firstCluster;
   uint16_t fragIdx = 0;
-  uint32_t fragCount = 1;
+  uint32_t clusterCount = 1;
 
-  m_clmt[0].start = cluster;
+  m_sectorMap[0].startSector = m_vol->clusterStartSector(cluster);
 
   while (true) {
     Cluster_t next;
     int8_t fg = m_vol->fatGet(cluster, &next);
     if (fg < 0) {
-      delete[] m_clmt;
-      m_clmt = nullptr;
+      delete[] m_sectorMap;
+      m_sectorMap = nullptr;
       return false;
     }
 
     if (fg == 0) {
-      // End of chain
-      m_clmt[fragIdx].count = fragCount;
+      // End of chain - convert cluster count to sector count
+      m_sectorMap[fragIdx].sectorCount = clusterCount * sectorsPerCluster;
       fragIdx++;
       break;
     }
 
     if (next == cluster + 1) {
       // Contiguous, extend current fragment
-      fragCount++;
+      clusterCount++;
     } else {
-      // New fragment
-      m_clmt[fragIdx].count = fragCount;
+      // New fragment - convert cluster count to sector count
+      m_sectorMap[fragIdx].sectorCount = clusterCount * sectorsPerCluster;
       fragIdx++;
 
       // Grow buffer if needed
       if (fragIdx >= capacity - 1) {
         uint16_t newCapacity = capacity * 2;
-        ExFatClmtEntry_t* newClmt = new ExFatClmtEntry_t[newCapacity];
-        if (!newClmt) {
-          delete[] m_clmt;
-          m_clmt = nullptr;
+        ExFatSectorMapEntry_t* newMap = new ExFatSectorMapEntry_t[newCapacity];
+        if (!newMap) {
+          delete[] m_sectorMap;
+          m_sectorMap = nullptr;
           return false;
         }
-        memcpy(newClmt, m_clmt, fragIdx * sizeof(ExFatClmtEntry_t));
-        delete[] m_clmt;
-        m_clmt = newClmt;
+        memcpy(newMap, m_sectorMap, fragIdx * sizeof(ExFatSectorMapEntry_t));
+        delete[] m_sectorMap;
+        m_sectorMap = newMap;
         capacity = newCapacity;
       }
 
-      m_clmt[fragIdx].start = next;
-      fragCount = 1;
+      m_sectorMap[fragIdx].startSector = m_vol->clusterStartSector(next);
+      clusterCount = 1;
     }
     cluster = next;
   }
 
   // Add terminator
-  m_clmt[fragIdx].count = 0;
-  m_clmt[fragIdx].start = 0;
+  m_sectorMap[fragIdx].sectorCount = 0;
+  m_sectorMap[fragIdx].startSector = 0;
 
-  m_clmtSize = capacity;
-  m_clmtUsed = fragIdx + 1;
+  m_sectorMapSize = capacity;
+  m_sectorMapUsed = fragIdx + 1;
 
   return true;
 }
 //------------------------------------------------------------------------------
-Cluster_t ExFatFile::clmtLookup(uint32_t clusterIndex) const {
-  if (!m_clmt) {
+Sector_t ExFatFile::sectorMapLookup(uint32_t fileSector, uint32_t* fragmentRemaining) const {
+  if (!m_sectorMap) {
     return 0;
   }
 
   uint32_t offset = 0;
-  for (uint16_t i = 0; m_clmt[i].count != 0; i++) {
-    if (clusterIndex < offset + m_clmt[i].count) {
-      // Found the fragment containing this cluster
-      return m_clmt[i].start + (clusterIndex - offset);
+  for (uint16_t i = 0; m_sectorMap[i].sectorCount != 0; i++) {
+    if (fileSector < offset + m_sectorMap[i].sectorCount) {
+      // Found the fragment containing this sector
+      uint32_t sectorInFragment = fileSector - offset;
+      if (fragmentRemaining) {
+        *fragmentRemaining = m_sectorMap[i].sectorCount - sectorInFragment;
+      }
+      return m_sectorMap[i].startSector + sectorInFragment;
     }
-    offset += m_clmt[i].count;
+    offset += m_sectorMap[i].sectorCount;
   }
 
-  return 0;  // Invalid index
+  return 0;  // Invalid sector index
 }
 //------------------------------------------------------------------------------
-void ExFatFile::freeClmt() {
-  if (m_clmt) {
-    delete[] m_clmt;
-    m_clmt = nullptr;
-    m_clmtSize = 0;
-    m_clmtUsed = 0;
+void ExFatFile::freeSectorMap() {
+  if (m_sectorMap) {
+    delete[] m_sectorMap;
+    m_sectorMap = nullptr;
+    m_sectorMapSize = 0;
+    m_sectorMapUsed = 0;
   }
 }
 //------------------------------------------------------------------------------
 bool ExFatFile::enableFastSeek() {
-  if (m_clmt) {
+  if (m_sectorMap) {
     return true;  // Already enabled
   }
-  return buildClmt();
+  return buildSectorMap();
 }
 //------------------------------------------------------------------------------
 void ExFatFile::disableFastSeek() {
-  freeClmt();
+  freeSectorMap();
+}
+//------------------------------------------------------------------------------
+uint32_t ExFatFile::readSectorsDirect(uint32_t fileSector, uint8_t* dst, uint32_t count) {
+  if (!m_sectorMap || count == 0) {
+    return 0;
+  }
+
+  // Check if read extends beyond file size
+  uint32_t fileSectors = (m_dataLength + 511) / 512;
+  if (fileSector >= fileSectors) {
+    return 0;
+  }
+  if (fileSector + count > fileSectors) {
+    count = fileSectors - fileSector;
+  }
+
+  uint32_t sectorsRead = 0;
+  FsBlockDevice* dev = m_vol->blockDevice();
+
+  while (count > 0) {
+    uint32_t fragmentRemaining;
+    Sector_t physicalSector = sectorMapLookup(fileSector, &fragmentRemaining);
+    if (physicalSector == 0) {
+      break;  // Error or past end
+    }
+
+    // Read up to fragment boundary
+    uint32_t toRead = (count < fragmentRemaining) ? count : fragmentRemaining;
+    if (!dev->readSectors(physicalSector, dst, toRead)) {
+      break;  // Read error
+    }
+
+    sectorsRead += toRead;
+    fileSector += toRead;
+    dst += toRead * 512;
+    count -= toRead;
+  }
+
+  return sectorsRead;
+}
+//------------------------------------------------------------------------------
+uint32_t ExFatFile::writeSectorsDirect(uint32_t fileSector, const uint8_t* src, uint32_t count) {
+  if (!m_sectorMap || count == 0) {
+    return 0;
+  }
+
+  // Check if write extends beyond file size
+  uint32_t fileSectors = (m_dataLength + 511) / 512;
+  if (fileSector >= fileSectors) {
+    return 0;
+  }
+  if (fileSector + count > fileSectors) {
+    count = fileSectors - fileSector;
+  }
+
+  uint32_t sectorsWritten = 0;
+
+  while (count > 0) {
+    uint32_t fragmentRemaining;
+    Sector_t physicalSector = sectorMapLookup(fileSector, &fragmentRemaining);
+    if (physicalSector == 0) {
+      break;  // Error or past end
+    }
+
+    // Write up to fragment boundary using cache-safe write
+    // This invalidates the cache if these sectors are cached
+    uint32_t toWrite = (count < fragmentRemaining) ? count : fragmentRemaining;
+    if (!m_vol->cacheSafeWrite(physicalSector, src, toWrite)) {
+      break;  // Write error
+    }
+
+    sectorsWritten += toWrite;
+    fileSector += toWrite;
+    src += toWrite * 512;
+    count -= toWrite;
+  }
+
+  return sectorsWritten;
 }
 #endif  // USE_FAT_FILE_FAST_SEEK

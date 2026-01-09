@@ -135,6 +135,8 @@ class FatPartition {
    * \return true if busy else false.
    */
   bool isBusy() { return m_blockDev->isBusy(); }
+  /** \return Pointer to block device. */
+  FsBlockDevice* blockDevice() { return m_blockDev; }
   //----------------------------------------------------------------------------
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
   bool dmpDirSector(print_t* pr, Sector_t sector);

@@ -348,14 +348,14 @@ class FsBaseFile {
 #endif  // USE_FAT_FILE_FLAG_CONTIGUOUS
   }
 #if USE_FAT_FILE_FAST_SEEK
-  /** Enable fast seek by building Cluster Link Map Table.
+  /** Enable fast seek by building sector map table.
    * \return true for success, false if allocation failed or file empty. */
   bool enableFastSeek() {
     return m_fFile   ? m_fFile->enableFastSeek()
            : m_xFile ? m_xFile->enableFastSeek()
                      : false;
   }
-  /** Disable fast seek and free CLMT memory. */
+  /** Disable fast seek and free sector map memory. */
   void disableFastSeek() {
     if (m_fFile) m_fFile->disableFastSeek();
     if (m_xFile) m_xFile->disableFastSeek();
@@ -370,6 +370,28 @@ class FsBaseFile {
   uint16_t fragmentCount() const {
     return m_fFile   ? m_fFile->fragmentCount()
            : m_xFile ? m_xFile->fragmentCount()
+                     : 0;
+  }
+  /** Read sectors directly from SD card, bypassing filesystem.
+   * Requires enableFastSeek() to have been called.
+   * \param[in] fileSector Starting sector number within file (0-based).
+   * \param[out] dst Pointer to buffer for data.
+   * \param[in] count Number of 512-byte sectors to read.
+   * \return Number of sectors read, or 0 on error. */
+  uint32_t readSectorsDirect(uint32_t fileSector, uint8_t* dst, uint32_t count) {
+    return m_fFile   ? m_fFile->readSectorsDirect(fileSector, dst, count)
+           : m_xFile ? m_xFile->readSectorsDirect(fileSector, dst, count)
+                     : 0;
+  }
+  /** Write sectors directly to SD card, bypassing filesystem.
+   * Requires enableFastSeek() to have been called.
+   * \param[in] fileSector Starting sector number within file (0-based).
+   * \param[in] src Pointer to data to write.
+   * \param[in] count Number of 512-byte sectors to write.
+   * \return Number of sectors written, or 0 on error. */
+  uint32_t writeSectorsDirect(uint32_t fileSector, const uint8_t* src, uint32_t count) {
+    return m_fFile   ? m_fFile->writeSectorsDirect(fileSector, src, count)
+           : m_xFile ? m_xFile->writeSectorsDirect(fileSector, src, count)
                      : 0;
   }
 #endif  // USE_FAT_FILE_FAST_SEEK
