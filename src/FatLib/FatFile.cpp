@@ -126,6 +126,9 @@ fail:
 }
 //------------------------------------------------------------------------------
 bool FatFile::close() {
+#if USE_FAT_FILE_FAST_SEEK
+  freeClmt();
+#endif  // USE_FAT_FILE_FAST_SEEK
   bool rtn = sync();
   m_attributes = FILE_ATTR_CLOSED;
   m_flags = 0;
@@ -1201,6 +1204,16 @@ bool FatFile::seekSet(uint32_t pos) {
     goto done;
   }
 #endif  // USE_FAT_FILE_FLAG_CONTIGUOUS
+#if USE_FAT_FILE_FAST_SEEK
+  if (m_clmt) {
+    m_curCluster = clmtLookup(nNew);
+    if (m_curCluster == 0) {
+      DBG_FAIL_MACRO;
+      goto fail;
+    }
+    goto done;
+  }
+#endif  // USE_FAT_FILE_FAST_SEEK
   // calculate cluster index for current position
   nCur = (m_curPosition - 1) >> (m_vol->bytesPerClusterShift());
 
@@ -1503,3 +1516,136 @@ fail:
   m_error |= WRITE_ERROR;
   return 0;
 }
+//------------------------------------------------------------------------------
+#if USE_FAT_FILE_FAST_SEEK
+bool FatFile::buildClmt() {
+  // Can't build CLMT for empty file or directory
+  if (m_firstCluster == 0 || m_fileSize == 0 || !isFile()) {
+    return false;
+  }
+
+#if USE_FAT_FILE_FLAG_CONTIGUOUS
+  // Contiguous files need only 2 entries
+  if (isContiguous()) {
+    m_clmt = new FatClmtEntry_t[2];
+    if (!m_clmt) {
+      return false;
+    }
+    m_clmtSize = 2;
+    uint32_t clusters =
+        (m_fileSize + m_vol->bytesPerCluster() - 1) >> m_vol->bytesPerClusterShift();
+    m_clmt[0].count = clusters;
+    m_clmt[0].start = m_firstCluster;
+    m_clmt[1].count = 0;  // Terminator
+    m_clmt[1].start = 0;
+    m_clmtUsed = 2;
+    return true;
+  }
+#endif  // USE_FAT_FILE_FLAG_CONTIGUOUS
+
+  // Allocate initial buffer
+  uint16_t capacity = 16;
+  m_clmt = new FatClmtEntry_t[capacity];
+  if (!m_clmt) {
+    return false;
+  }
+
+  // Walk FAT chain and build fragment table
+  Cluster_t cluster = m_firstCluster;
+  uint16_t fragIdx = 0;
+  uint32_t fragCount = 1;
+
+  m_clmt[0].start = cluster;
+
+  while (true) {
+    Cluster_t next;
+    int8_t fg = m_vol->fatGet(cluster, &next);
+    if (fg < 0) {
+      delete[] m_clmt;
+      m_clmt = nullptr;
+      return false;
+    }
+
+    if (fg == 0) {
+      // End of chain
+      m_clmt[fragIdx].count = fragCount;
+      fragIdx++;
+      break;
+    }
+
+    if (next == cluster + 1) {
+      // Contiguous, extend current fragment
+      fragCount++;
+    } else {
+      // New fragment
+      m_clmt[fragIdx].count = fragCount;
+      fragIdx++;
+
+      // Grow buffer if needed
+      if (fragIdx >= capacity - 1) {
+        uint16_t newCapacity = capacity * 2;
+        FatClmtEntry_t* newClmt = new FatClmtEntry_t[newCapacity];
+        if (!newClmt) {
+          delete[] m_clmt;
+          m_clmt = nullptr;
+          return false;
+        }
+        memcpy(newClmt, m_clmt, fragIdx * sizeof(FatClmtEntry_t));
+        delete[] m_clmt;
+        m_clmt = newClmt;
+        capacity = newCapacity;
+      }
+
+      m_clmt[fragIdx].start = next;
+      fragCount = 1;
+    }
+    cluster = next;
+  }
+
+  // Add terminator
+  m_clmt[fragIdx].count = 0;
+  m_clmt[fragIdx].start = 0;
+
+  m_clmtSize = capacity;
+  m_clmtUsed = fragIdx + 1;
+
+  return true;
+}
+//------------------------------------------------------------------------------
+Cluster_t FatFile::clmtLookup(uint32_t clusterIndex) const {
+  if (!m_clmt) {
+    return 0;
+  }
+
+  uint32_t offset = 0;
+  for (uint16_t i = 0; m_clmt[i].count != 0; i++) {
+    if (clusterIndex < offset + m_clmt[i].count) {
+      // Found the fragment containing this cluster
+      return m_clmt[i].start + (clusterIndex - offset);
+    }
+    offset += m_clmt[i].count;
+  }
+
+  return 0;  // Invalid index
+}
+//------------------------------------------------------------------------------
+void FatFile::freeClmt() {
+  if (m_clmt) {
+    delete[] m_clmt;
+    m_clmt = nullptr;
+    m_clmtSize = 0;
+    m_clmtUsed = 0;
+  }
+}
+//------------------------------------------------------------------------------
+bool FatFile::enableFastSeek() {
+  if (m_clmt) {
+    return true;  // Already enabled
+  }
+  return buildClmt();
+}
+//------------------------------------------------------------------------------
+void FatFile::disableFastSeek() {
+  freeClmt();
+}
+#endif  // USE_FAT_FILE_FAST_SEEK

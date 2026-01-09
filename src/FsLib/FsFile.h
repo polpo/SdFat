@@ -347,6 +347,32 @@ class FsBaseFile {
     return m_xFile ? m_xFile->isContiguous() : false;
 #endif  // USE_FAT_FILE_FLAG_CONTIGUOUS
   }
+#if USE_FAT_FILE_FAST_SEEK
+  /** Enable fast seek by building Cluster Link Map Table.
+   * \return true for success, false if allocation failed or file empty. */
+  bool enableFastSeek() {
+    return m_fFile   ? m_fFile->enableFastSeek()
+           : m_xFile ? m_xFile->enableFastSeek()
+                     : false;
+  }
+  /** Disable fast seek and free CLMT memory. */
+  void disableFastSeek() {
+    if (m_fFile) m_fFile->disableFastSeek();
+    if (m_xFile) m_xFile->disableFastSeek();
+  }
+  /** \return true if fast seek is enabled for this file. */
+  bool isFastSeekEnabled() const {
+    return m_fFile   ? m_fFile->isFastSeekEnabled()
+           : m_xFile ? m_xFile->isFastSeekEnabled()
+                     : false;
+  }
+  /** \return number of fragments in file (0 if fast seek not enabled). */
+  uint16_t fragmentCount() const {
+    return m_fFile   ? m_fFile->fragmentCount()
+           : m_xFile ? m_xFile->fragmentCount()
+                     : 0;
+  }
+#endif  // USE_FAT_FILE_FAST_SEEK
   /** \return True if this is a directory else false. */
   bool isDir() const {
     return m_fFile ? m_fFile->isDir() : m_xFile ? m_xFile->isDir() : false;

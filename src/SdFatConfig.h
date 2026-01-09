@@ -131,6 +131,15 @@
 #endif  // USE_FAT_FILE_FLAG_CONTIGUOUS
 //------------------------------------------------------------------------------
 /**
+ * Set USE_FAT_FILE_FAST_SEEK nonzero to enable fast seek support.
+ * This allows files to build a Cluster Link Map Table (CLMT) for
+ * O(fragments) seek time instead of O(clusters).
+ */
+#ifndef USE_FAT_FILE_FAST_SEEK
+#define USE_FAT_FILE_FAST_SEEK 1
+#endif  // USE_FAT_FILE_FAST_SEEK
+//------------------------------------------------------------------------------
+/**
  * Set ENABLE_DEDICATED_SPI non-zero to enable dedicated use of the SPI bus.
  * Selecting dedicated SPI in SdSpiConfig() will produce better
  * performance by using very large multi-block transfers to and
