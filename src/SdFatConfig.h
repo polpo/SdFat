@@ -132,12 +132,30 @@
 //------------------------------------------------------------------------------
 /**
  * Set USE_FAT_FILE_FAST_SEEK nonzero to enable fast seek support.
- * This allows files to build a sector map for O(fragments) seek time instead
- * of O(clusters).
+ *
+ * Without fast seek, seeking to position P requires traversing the FAT chain
+ * from the file's first cluster to the cluster containing P - O(clusters to P).
+ * For a 1GB file with 32KB clusters, seeking to the end traverses ~32,000 entries.
+ *
+ * With fast seek, a sector map is built once when the file is opened. Seeks
+ * then scan only the fragment table - O(fragments in file). A contiguous file
+ * is O(1); a 10-fragment file is O(10) regardless of seek position.
+ *
+ * Additionally, readSectorsDirect()/writeSectorsDirect() allow bypassing the
+ * filesystem cache for direct SD card access when the sector map is available.
  */
 #ifndef USE_FAT_FILE_FAST_SEEK
 #define USE_FAT_FILE_FAST_SEEK 1
 #endif  // USE_FAT_FILE_FAST_SEEK
+/**
+ * Maximum number of fragments supported for fast seek per file.
+ * Files with more fragments will fail enableFastSeek() and fall back to
+ * standard seek/read/write. Each fragment uses 8 bytes of memory for FAT or
+ * 12 bytes of memory for ExFAT.
+ */
+#ifndef FAST_SEEK_MAX_FRAGMENTS
+#define FAST_SEEK_MAX_FRAGMENTS 128
+#endif  // FAST_SEEK_MAX_FRAGMENTS
 //------------------------------------------------------------------------------
 /**
  * Set ENABLE_DEDICATED_SPI non-zero to enable dedicated use of the SPI bus.

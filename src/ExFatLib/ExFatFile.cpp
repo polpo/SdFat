@@ -831,6 +831,13 @@ bool ExFatFile::buildSectorMap() {
       m_sectorMap[fragIdx].sectorCount = clusterCount * sectorsPerCluster;
       fragIdx++;
 
+      // Check fragment limit
+      if (fragIdx >= FAST_SEEK_MAX_FRAGMENTS) {
+        delete[] m_sectorMap;
+        m_sectorMap = nullptr;
+        return false;
+      }
+
       // Grow buffer if needed
       if (fragIdx >= capacity - 1) {
         uint16_t newCapacity = capacity * 2;
