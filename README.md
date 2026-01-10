@@ -1,3 +1,20 @@
+## Fork Note
+
+This is a fork of [SdFat](https://github.com/greiman/SdFat) originally created
+for the [PicoIDE project](https://picoide.com) that has the following changes:
+
+* Adds fast seek (inspired by [fast seek in ChaN's
+  FatFs](https://elm-chan.org/fsw/ff/doc/lseek.html)). This effectively makes
+  seek/read/write in fragmented files 99% as fast as in contiguous files, at
+  the expense of a lookup table that uses 8 bytes per fragment (12 for ExFAT)
+  in opened files.
+* Can be added as a library in CMake projects
+* Can use the Raspberry Pi Pico C/C++ SDK instead of Arduino
+* Does not claim all PIO SMs for SDIO on the RP2040/RP2350 platform, leaving 2
+  available for the 5 instructions free in the PIO.
+
+The rest of the original SdFat README.md follows:
+
 ### Warning: This version has major internal changes.
 SdFat version 2.3.1 corrects handling of the exFAT fields validLength
 and dataLength.
