@@ -467,8 +467,14 @@ typedef uint8_t SdCsPin_t;
 //------------------------------------------------------------------------------
 /** Enable SDIO driver if available. */
 #if defined(ARDUINO_ARCH_RP2040)
+// When using non-SdFat mainline SDIO, HAS_PIO_SDIO should be 0 (set via CMake)
+// and SD_USE_SDIO should be 1 to enable HAS_SDIO_CLASS
+#ifndef HAS_PIO_SDIO
 #define HAS_PIO_SDIO 1
+#endif
+#if HAS_PIO_SDIO || defined(SD_USE_SDIO)
 #define HAS_SDIO_CLASS 1
+#endif
 #endif  // defined(ARDUINO_ARCH_RP2040)
 
 #if defined(__MK64FX512__) || defined(__MK66FX1M0__)

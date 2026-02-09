@@ -28,12 +28,13 @@
  */
 #pragma once
 #include "SdSpiCard/SdSpiCard.h"
-#if defined(HAS_PIO_SDIO)
+#if HAS_PIO_SDIO
 #include "PioSdio/PioSdioCard.h"
 #elif defined(HAS_TEENSY_SDIO)
 #include "TeensySdio/TeensySdioCard.h"
-#else
-class SdioConfig {};
+#elif HAS_SDIO_CLASS
+// other external SDIO implementation provides SdioCard
+#include <SdioCard.h>
 #endif  //
 
 #if HAS_SDIO_CLASS
