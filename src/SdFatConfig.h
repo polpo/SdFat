@@ -143,6 +143,10 @@
  *
  * Additionally, readSectorsDirect()/writeSectorsDirect() allow bypassing the
  * filesystem cache for direct SD card access when the sector map is available.
+ * On exFAT they honor the file's valid length: reads past it return zeros
+ * and writes past it raise it. Sectors between the old valid length and a
+ * write are left as they were on the card; eraseUnwrittenSectors() can
+ * clear them first.
  */
 #ifndef USE_FAT_FILE_FAST_SEEK
 #define USE_FAT_FILE_FAST_SEEK 1

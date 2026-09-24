@@ -350,6 +350,8 @@ class ExFatFile {
   uint16_t fragmentCount() const { return m_sectorMap ? m_sectorMapUsed - 1 : 0; }
   /** Read sectors directly from SD card, bypassing filesystem.
    * Requires enableFastSeek() to have been called.
+   * Sectors past validLength() are returned as zeros without reading the
+   * card, matching read().
    * \param[in] fileSector Starting sector number within file (0-based).
    * \param[out] dst Pointer to buffer for data.
    * \param[in] count Number of 512-byte sectors to read.
@@ -357,11 +359,21 @@ class ExFatFile {
   uint32_t readSectorsDirect(uint32_t fileSector, uint8_t* dst, uint32_t count);
   /** Write sectors directly to SD card, bypassing filesystem.
    * Requires enableFastSeek() to have been called.
+   * A write ending past validLength() raises the valid length to its end
+   * and marks the directory entry for sync(). Sectors between the old valid
+   * length and the write are not zeroed and keep whatever the card held;
+   * see eraseUnwrittenSectors().
    * \param[in] fileSector Starting sector number within file (0-based).
    * \param[in] src Pointer to data to write.
    * \param[in] count Number of 512-byte sectors to write.
    * \return Number of sectors written, or 0 on error. */
   uint32_t writeSectorsDirect(uint32_t fileSector, const uint8_t* src, uint32_t count);
+  /** Erase every allocated sector of the file past validLength() with the
+   * SD card ERASE command, so they read as all zeros or all ones instead
+   * of stale data. Only the file's own sectors are touched. Requires
+   * enableFastSeek() and a writable file. Does not change validLength().
+   * \return true for success or false for failure. */
+  bool eraseUnwrittenSectors();
 #endif  // USE_FAT_FILE_FAST_SEEK
   /** \return True if this is a directory. */
   bool isDir() const { return m_attributes & FILE_ATTR_DIR; }
@@ -825,6 +837,18 @@ class ExFatFile {
 
   /** \return The valid number of bytes in a file. */
   uint64_t validLength() const { return m_validLength; }
+  /** Set the valid data length of a file.
+   *
+   * exFAT keeps the valid length, how many bytes have been written, apart
+   * from the data length, how many bytes are allocated. Bytes between the
+   * two are undefined on disk and read as zero. Raising the valid length
+   * makes those bytes visible as they are on the card. The change is
+   * written to the directory entry by sync() or close().
+   *
+   * \param[in] length New valid length, at most fileSize().
+   * \return true for success or false for failure.
+   */
+  bool setValidLength(uint64_t length);
   /** Write a string to a file. Used by the Arduino Print class.
    * \param[in] str Pointer to the string.
    * Use getWriteError to check for errors.

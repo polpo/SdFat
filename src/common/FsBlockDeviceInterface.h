@@ -39,6 +39,19 @@ class FsBlockDeviceInterface {
 
   /** end use of device */
   virtual void end() {}
+  /** Erase a range of sectors. Optional; a device without erase support
+   * returns false.
+   *
+   * \param[in] firstSector The address of the first sector in the range.
+   * \param[in] lastSector The address of the last sector in the range.
+   *
+   * \return true for success or false for failure.
+   */
+  virtual bool erase(Sector_t firstSector, Sector_t lastSector) {
+    (void)firstSector;
+    (void)lastSector;
+    return false;
+  }
   /**
    * Check for FsBlockDevice busy.
    *
