@@ -12,6 +12,7 @@ for the [PicoIDE project](https://picoide.com) that has the following changes:
 * Can use the Raspberry Pi Pico C/C++ SDK instead of Arduino
 * Does not claim all PIO SMs for SDIO on the RP2040/RP2350 platform, leaving 2
   available for the 5 instructions free in the PIO.
+* Allows for swappable SDIO backends
 
 The rest of the original SdFat README.md follows:
 
