@@ -924,33 +924,51 @@ uint32_t ExFatFile::readSectorsDirect(uint32_t fileSector, uint8_t* dst, uint32_
     count = fileSectors - fileSector;
   }
 
+  // Sectors past validLength should read back as zeros
+  uint32_t validSectors = (m_validLength + 511) / 512;
+  uint32_t toRead = fileSector < validSectors ? validSectors - fileSector : 0;
+  if (toRead > count) {
+    toRead = count;
+  }
+  uint32_t toZero = count - toRead;
+
   uint32_t sectorsRead = 0;
   FsBlockDevice* dev = m_vol->blockDevice();
 
-  while (count > 0) {
+  while (toRead > 0) {
     uint32_t fragmentRemaining;
     Sector_t physicalSector = sectorMapLookup(fileSector, &fragmentRemaining);
     if (physicalSector == 0) {
-      break;  // Error or past end
+      return sectorsRead;  // Error or past end
     }
 
     // Read up to fragment boundary
-    uint32_t toRead = (count < fragmentRemaining) ? count : fragmentRemaining;
-    if (!dev->readSectors(physicalSector, dst, toRead)) {
-      break;  // Read error
+    uint32_t n = (toRead < fragmentRemaining) ? toRead : fragmentRemaining;
+    if (!dev->readSectors(physicalSector, dst, n)) {
+      return sectorsRead;  // Read error
     }
 
-    sectorsRead += toRead;
-    fileSector += toRead;
-    dst += toRead * 512;
-    count -= toRead;
+    sectorsRead += n;
+    fileSector += n;
+    dst += n * 512;
+    toRead -= n;
+  }
+
+  // Zero the part of the last valid sector that lies past validLength
+  uint32_t validTail = m_validLength & 511;
+  if (sectorsRead && fileSector == validSectors && validTail) {
+    memset(dst - 512 + validTail, 0, 512 - validTail);
+  }
+  if (toZero) {
+    memset(dst, 0, toZero * 512);
+    sectorsRead += toZero;
   }
 
   return sectorsRead;
 }
 //------------------------------------------------------------------------------
 uint32_t ExFatFile::writeSectorsDirect(uint32_t fileSector, const uint8_t* src, uint32_t count) {
-  if (!m_sectorMap || count == 0) {
+  if (!m_sectorMap || count == 0 || !isWritable()) {
     return 0;
   }
 
@@ -985,6 +1003,44 @@ uint32_t ExFatFile::writeSectorsDirect(uint32_t fileSector, const uint8_t* src, 
     count -= toWrite;
   }
 
+  // Data past validLength reads as zeros, so raise it over what was written
+  if (sectorsWritten) {
+    uint64_t end = static_cast<uint64_t>(fileSector) * 512;
+    if (end > m_dataLength) {
+      end = m_dataLength;
+    }
+    if (end > m_validLength) {
+      m_validLength = end;
+      m_flags |= FILE_FLAG_DIR_DIRTY;
+    }
+  }
+
   return sectorsWritten;
+}
+//------------------------------------------------------------------------------
+bool ExFatFile::eraseUnwrittenSectors() {
+  if (!m_sectorMap || !isWritable()) {
+    return false;
+  }
+  uint32_t validSectors = (m_validLength + 511) / 512;
+  // Drop any cached copy of the sectors about to be erased
+  if (!m_vol->cacheClear()) {
+    return false;
+  }
+  FsBlockDevice* dev = m_vol->blockDevice();
+  uint32_t offset = 0;
+  for (uint16_t i = 0; m_sectorMap[i].sectorCount != 0; i++) {
+    uint32_t fragEnd = offset + m_sectorMap[i].sectorCount;
+    if (fragEnd > validSectors) {
+      uint32_t skip = validSectors > offset ? validSectors - offset : 0;
+      Sector_t first = m_sectorMap[i].startSector + skip;
+      Sector_t last = m_sectorMap[i].startSector + m_sectorMap[i].sectorCount - 1;
+      if (!dev->erase(first, last)) {
+        return false;
+      }
+    }
+    offset = fragEnd;
+  }
+  return true;
 }
 #endif  // USE_FAT_FILE_FAST_SEEK

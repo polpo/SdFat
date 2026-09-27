@@ -7,7 +7,10 @@ for the [PicoIDE project](https://picoide.com) that has the following changes:
   FatFs](https://elm-chan.org/fsw/ff/doc/lseek.html)). This effectively makes
   seek/read/write in fragmented files 99% as fast as in contiguous files, at
   the expense of a lookup table that uses 8 bytes per fragment (12 for ExFAT)
-  in opened files.
+  in opened files. It also provides `readSectorsDirect()` and
+  `writeSectorsDirect()` for raw sector access to a file's data. On exFAT
+  these honor the valid data length, and `eraseUnwrittenSectors()` can clear
+  the unwritten part of a preallocated file with the SD card's erase command.
 * Can be added as a library in CMake projects
 * Can use the Raspberry Pi Pico C/C++ SDK instead of Arduino
 * Does not claim all PIO SMs for SDIO on the RP2040/RP2350 platform, leaving 2

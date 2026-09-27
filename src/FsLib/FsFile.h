@@ -394,6 +394,14 @@ class FsBaseFile {
            : m_xFile ? m_xFile->writeSectorsDirect(fileSector, src, count)
                      : 0;
   }
+  /** Erase the sectors of an exFAT file past its valid length. See
+   * ExFatFile::eraseUnwrittenSectors(). A FAT file has no such sectors.
+   * \return true for success or false for failure. */
+  bool eraseUnwrittenSectors() {
+    return m_fFile   ? true
+           : m_xFile ? m_xFile->eraseUnwrittenSectors()
+                     : false;
+  }
 #endif  // USE_FAT_FILE_FAST_SEEK
   /** \return True if this is a directory else false. */
   bool isDir() const {
@@ -921,6 +929,15 @@ class FsBaseFile {
   /** \return The valid number of bytes in a file. */
   uint64_t validLength() const {
     return m_fFile ? m_fFile->fileSize() : m_xFile ? m_xFile->validLength() : 0;
+  }
+  /** Set the valid data length of an exFAT file. See ExFatFile::setValidLength().
+   * A FAT file has no separate valid length, so only its fileSize() is accepted.
+   * \param[in] length New valid length, at most fileSize().
+   * \return true for success or false for failure. */
+  bool setValidLength(uint64_t length) {
+    return m_fFile   ? length == m_fFile->fileSize()
+           : m_xFile ? m_xFile->setValidLength(length)
+                     : false;
   }
   /** Write a string to a file. Used by the Arduino Print class.
    * \param[in] str Pointer to the string.

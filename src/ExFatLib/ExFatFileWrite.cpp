@@ -47,6 +47,10 @@ bool ExFatFile::rename(ExFatFile* dirFile, const char* newPath) {
   (void)newPath;
   return false;
 }
+bool ExFatFile::setValidLength(uint64_t length) {
+  (void)length;
+  return false;
+}
 bool ExFatFile::sync() { return false; }
 bool ExFatFile::truncate() { return false; }
 size_t ExFatFile::write(const void* buf, size_t nbyte) {
@@ -359,6 +363,21 @@ bool ExFatFile::rmdir() {
   m_attributes = FILE_ATTR_FILE;
   m_flags |= FILE_FLAG_WRITE;
   return remove();
+
+fail:
+  return false;
+}
+//------------------------------------------------------------------------------
+bool ExFatFile::setValidLength(uint64_t length) {
+  if (!isWritable() || !isFile() || length > m_dataLength) {
+    DBG_FAIL_MACRO;
+    goto fail;
+  }
+  if (length != m_validLength) {
+    m_validLength = length;
+    m_flags |= FILE_FLAG_DIR_DIRTY;
+  }
+  return true;
 
 fail:
   return false;
